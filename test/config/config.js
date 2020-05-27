@@ -30,8 +30,10 @@ module.exports = {
     host: env.SEQ_MSSQL_HOST || env.SEQ_HOST || '127.0.0.1',
     port: env.SEQ_MSSQL_PORT || env.SEQ_PORT || 1433,
     dialectOptions: {
-      // big insert queries need a while
-      requestTimeout: 60000
+      options: {
+        encrypt: false,
+        requestTimeout: 60000
+      }
     },
     pool: {
       max: env.SEQ_MSSQL_POOL_MAX || env.SEQ_POOL_MAX || 5,
@@ -75,6 +77,7 @@ module.exports = {
     pool: {
       max: env.SEQ_PG_POOL_MAX || env.SEQ_POOL_MAX || 5,
       idle: env.SEQ_PG_POOL_IDLE || env.SEQ_POOL_IDLE || 3000
-    }
+    },
+    minifyAliases: env.SEQ_PG_MINIFY_ALIASES
   }
 };

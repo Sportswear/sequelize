@@ -5,7 +5,7 @@ const expect = chai.expect;
 const Support = require('./support');
 const DataTypes = require('../../lib/data-types');
 const Utils = require('../../lib/utils');
-const logger = require('../../lib/utils/logger').getLogger();
+const { logger } = require('../../lib/utils/logger');
 const Op = Support.Sequelize.Op;
 
 describe(Support.getTestDialectTeaser('Utils'), () => {
@@ -20,15 +20,29 @@ describe(Support.getTestDialectTeaser('Utils'), () => {
     });
   });
 
+  describe('canTreatArrayAsAnd', () => {
+    it('Array can be treated as and', () => {
+      expect(Utils.canTreatArrayAsAnd([{ 'uuid': 1 }])).to.equal(true);
+      expect(Utils.canTreatArrayAsAnd([{ 'uuid': 1 }, { 'uuid': 2 }, 1])).to.equal(true);
+      expect(Utils.canTreatArrayAsAnd([new Utils.Where('uuid', 1)])).to.equal(true);
+      expect(Utils.canTreatArrayAsAnd([new Utils.Where('uuid', 1), new Utils.Where('uuid', 2)])).to.equal(true);
+      expect(Utils.canTreatArrayAsAnd([new Utils.Where('uuid', 1), { 'uuid': 2 }, 1])).to.equal(true);
+    });
+    it('Array cannot be treated as and', () => {
+      expect(Utils.canTreatArrayAsAnd([1, 'uuid'])).to.equal(false);
+      expect(Utils.canTreatArrayAsAnd([1])).to.equal(false);
+    });
+  });
+
   describe('toDefaultValue', () => {
     it('return plain data types', () => {
       expect(Utils.toDefaultValue(DataTypes.UUIDV4)).to.equal('UUIDV4');
     });
     it('return uuid v1', () => {
-      expect(/^[a-z0-9\-]{36}$/.test(Utils.toDefaultValue(DataTypes.UUIDV1()))).to.be.equal(true);
+      expect(/^[a-z0-9-]{36}$/.test(Utils.toDefaultValue(DataTypes.UUIDV1()))).to.be.equal(true);
     });
     it('return uuid v4', () => {
-      expect(/^[a-z0-9\-]{36}/.test(Utils.toDefaultValue(DataTypes.UUIDV4()))).to.be.equal(true);
+      expect(/^[a-z0-9-]{36}/.test(Utils.toDefaultValue(DataTypes.UUIDV4()))).to.be.equal(true);
     });
     it('return now', () => {
       expect(Object.prototype.toString.call(Utils.toDefaultValue(DataTypes.NOW()))).to.be.equal('[object Date]');
@@ -144,7 +158,7 @@ describe(Support.getTestDialectTeaser('Utils'), () => {
       });
     });
 
-    it('$or where', () => {
+    it('Op.or where', () => {
       expect(Utils.mapOptionFieldNames({
         where: {
           [Op.or]: {
@@ -171,7 +185,7 @@ describe(Support.getTestDialectTeaser('Utils'), () => {
       });
     });
 
-    it('$or[] where', () => {
+    it('Op.or[] where', () => {
       expect(Utils.mapOptionFieldNames({
         where: {
           [Op.or]: [
@@ -226,33 +240,9 @@ describe(Support.getTestDialectTeaser('Utils'), () => {
     });
   });
 
-  describe('stack', () => {
-    it('stack trace starts after call to Util.stack()', function this_here_test() { // eslint-disable-line
-      // We need a named function to be able to capture its trace
-      function a() {
-        return b();
-      }
-
-      function b() {
-        return c();
-      }
-
-      function c() {
-        return Utils.stack();
-      }
-
-      const stack = a();
-
-      expect(stack[0].getFunctionName()).to.eql('c');
-      expect(stack[1].getFunctionName()).to.eql('b');
-      expect(stack[2].getFunctionName()).to.eql('a');
-      expect(stack[3].getFunctionName()).to.eql('this_here_test');
-    });
-  });
-
   describe('Sequelize.cast', () => {
     const sql = Support.sequelize;
-    const generator = sql.queryInterface.QueryGenerator;
+    const generator = sql.queryInterface.queryGenerator;
     const run = generator.handleSequelizeMethod.bind(generator);
     const expectsql = Support.expectsql;
 
@@ -270,14 +260,9 @@ describe(Support.getTestDialectTeaser('Utils'), () => {
   });
 
   describe('Logger', () => {
-    it('deprecate', () => {
-      expect(logger.deprecate).to.be.a('function');
-      logger.deprecate('test deprecation');
-    });
-
     it('debug', () => {
-      expect(logger.debug).to.be.a('function');
-      logger.debug('test debug');
+      expect(logger.debugContext).to.be.a('function');
+      logger.debugContext('test debug');
     });
 
     it('warn', () => {
@@ -290,7 +275,6 @@ describe(Support.getTestDialectTeaser('Utils'), () => {
       const testLogger = logger.debugContext('test');
 
       expect(testLogger).to.be.a('function');
-      expect(testLogger.namespace).to.be.eql('sequelize:test');
     });
   });
 });

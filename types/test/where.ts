@@ -1,13 +1,29 @@
-import { AndOperator, fn, Model, Op, OrOperator, Sequelize, WhereOperators, WhereOptions } from 'sequelize';
+import { AndOperator, fn, Model, Op, OrOperator, Sequelize, WhereOperators, WhereOptions, literal, where as whereFn } from 'sequelize';
 import Transaction from '../lib/transaction';
 
 class MyModel extends Model {
-    public hi: number;
+    public hi!: number;
 }
 
 let where: WhereOptions;
 
-// From http://docs.sequelizejs.com/en/v4/docs/querying/
+// From https://sequelize.org/master/en/v4/docs/querying/
+
+/**
+ * Literal values
+ * @see WhereValue
+ */
+where = {
+  string: 'foo',
+  strings: ['foo'],
+  number: 1,
+  numbers: [1],
+  boolean: true,
+  buffer: Buffer.alloc(0),
+  buffers: [Buffer.alloc(0)],
+  null: null,
+  date: new Date()
+};
 
 // Operators
 
@@ -41,6 +57,10 @@ let operators: WhereOperators = {
     [Op.contains]: [1, 2], // @> [1, 2] (PG array contains operator)
     [Op.contained]: [1, 2], // <@ [1, 2] (PG array contained by operator)
     [Op.any]: [2, 3], // ANY ARRAY[2, 3]::INTEGER (PG only)
+    [Op.regexp]: '^[h|a|t]', // REGEXP/~ '^[h|a|t]' (MySQL/PG only)
+    [Op.notRegexp]: '^[h|a|t]', // NOT REGEXP/!~ '^[h|a|t]' (MySQL/PG only)
+    [Op.iRegexp]: '^[h|a|t]',    // ~* '^[h|a|t]' (PG only)
+    [Op.notIRegexp]: '^[h|a|t]' // !~* '^[h|a|t]' (PG only)
 };
 
 operators = {
@@ -110,6 +130,12 @@ where = {
             },
         },
     },
+    meta2: {
+      [Op.contains]: ['stringValue1', 'stringValue2', 'stringValue3']
+    },
+    meta3: {
+      [Op.contains]: [1, 2, 3, 4]
+    },
 };
 
 // Relations / Associations
@@ -136,37 +162,27 @@ MyModel.findOne({
 MyModel.destroy({ where });
 MyModel.update({ hi: 1 }, { where });
 
-// From http://docs.sequelizejs.com/en/v4/docs/models-usage/
+// From https://sequelize.org/master/en/v4/docs/models-usage/
 
-// find multiple entries
-MyModel.findAll().then(projects => {
-    // projects will be an array of all MyModel instances
-});
+async function test() {
+  // find multiple entries
+  let projects: MyModel[] = await MyModel.findAll();
 
-// search for specific attributes - hash usage
-MyModel.findAll({ where: { name: 'A MyModel', enabled: true } }).then(projects => {
-    // projects will be an array of MyModel instances with the specified name
-});
+  // search for specific attributes - hash usage
+  projects = await MyModel.findAll({ where: { name: 'A MyModel', enabled: true } })
 
-// search within a specific range
-MyModel.findAll({ where: { id: [1, 2, 3] } }).then(projects => {
-    // projects will be an array of MyModels having the id 1, 2 or 3
-    // this is actually doing an IN query
-});
+  // search within a specific range
+  projects = await MyModel.findAll({ where: { id: [1, 2, 3] } });
 
-// locks
-MyModel.findAll({ lock: Transaction.LOCK.KEY_SHARE }).then(projects => {
-    // noop
-});
+  // locks
+  projects = await MyModel.findAll({ lock: Transaction.LOCK.KEY_SHARE });
 
-// locks on model
-MyModel.findAll({ lock: { level: Transaction.LOCK.KEY_SHARE, of: MyModel} }).then(projects => {
-    // noop
-});
+  // locks on model
+  projects = await MyModel.findAll({ lock: { level: Transaction.LOCK.KEY_SHARE, of: MyModel} });
+}
 
 MyModel.findAll({
     where: {
-        // tslint:disable-next-line:no-object-literal-type-assertion
         id: {
             // casting here to check a missing operator is not accepted as field name
             [Op.and]: { a: 5 }, // AND (a = 5)
@@ -176,7 +192,7 @@ MyModel.findAll({
             [Op.lt]: 10, // id < 10
             [Op.lte]: 10, // id <= 10
             [Op.ne]: 20, // id != 20
-            [Op.between]: [6, 10], // BETWEEN 6 AND 10
+            [Op.between]: [6, 10] || [new Date(), new Date()], // BETWEEN 6 AND 10
             [Op.notBetween]: [11, 15], // NOT BETWEEN 11 AND 15
             [Op.in]: [1, 2], // IN [1, 2]
             [Op.notIn]: [1, 2], // NOT IN [1, 2]
@@ -188,6 +204,12 @@ MyModel.findAll({
             [Op.contains]: [1, 2], // @> [1, 2] (PG array contains operator)
             [Op.contained]: [1, 2], // <@ [1, 2] (PG array contained by operator)
             [Op.any]: [2, 3], // ANY ARRAY[2, 3]::INTEGER (PG only)
+            [Op.adjacent]: [1, 2],
+            [Op.strictLeft]: [1, 2],
+            [Op.strictRight]: [1, 2],
+            [Op.noExtendLeft]: [1, 2],
+            [Op.noExtendRight]: [1, 2],
+            [Op.values]: [1, 2],
         } as WhereOperators,
         status: {
             [Op.not]: false, // status NOT FALSE
@@ -252,3 +274,57 @@ where = {
 where = {
     [Op.gt]: fn('NOW'),
 };
+
+where = whereFn('test', {
+  [Op.gt]: new Date(),
+});
+
+// Literal as where
+where = literal('true')
+
+where = fn('LOWER', 'asd')
+
+MyModel.findAll({
+    where: literal('true')
+})
+
+// Where as having option
+MyModel.findAll({
+  having: where
+});
+
+where = {
+    [Op.lt]: Sequelize.literal('SOME_STRING')
+}
+
+Sequelize.where(
+    Sequelize.cast(Sequelize.col('SOME_COL'), 'INTEGER'), {
+        [Op.lt]: Sequelize.literal('LIT'),
+        [Op.any]: Sequelize.literal('LIT'),
+        [Op.gte]: Sequelize.literal('LIT'),
+        [Op.lt]: Sequelize.literal('LIT'),
+        [Op.lte]: Sequelize.literal('LIT'),
+        [Op.ne]: Sequelize.literal('LIT'),
+        [Op.not]: Sequelize.literal('LIT'),
+        [Op.in]: Sequelize.literal('LIT'),
+        [Op.notIn]: Sequelize.literal('LIT'),
+        [Op.like]: Sequelize.literal('LIT'),
+        [Op.notLike]: Sequelize.literal('LIT'),
+        [Op.iLike]: Sequelize.literal('LIT'),
+        [Op.overlap]: Sequelize.literal('LIT'),
+        [Op.contains]: Sequelize.literal('LIT'),
+        [Op.contained]: Sequelize.literal('LIT'),
+        [Op.gt]: Sequelize.literal('LIT'),
+        [Op.notILike]: Sequelize.literal('LIT'),
+    }
+)
+
+Sequelize.where(Sequelize.col("ABS"), Op.is, null);
+
+Sequelize.where(
+  Sequelize.fn("ABS", Sequelize.col("age")),
+  Op.like,
+  Sequelize.fn("ABS", Sequelize.col("age"))
+);
+
+Sequelize.where(Sequelize.col("ABS"), null);

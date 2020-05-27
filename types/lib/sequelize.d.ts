@@ -1,5 +1,4 @@
 import * as DataTypes from './data-types';
-import * as Deferrable from './deferrable';
 import { HookReturn, Hooks, SequelizeHooks } from './hooks';
 import { ValidationOptions } from './instance-validator';
 import {
@@ -19,27 +18,40 @@ import {
   UpdateOptions,
   WhereAttributeHash,
   WhereOperators,
+  ModelCtor,
+  Hookable,
 } from './model';
 import { ModelManager } from './model-manager';
-import * as Op from './operators';
-import { Promise } from './promise';
-import { QueryInterface, QueryOptions, QueryOptionsWithModel, QueryOptionsWithType } from './query-interface';
+import { QueryInterface, QueryOptions, QueryOptionsWithModel, QueryOptionsWithType, ColumnsDescription } from './query-interface';
 import QueryTypes = require('./query-types');
 import { Transaction, TransactionOptions } from './transaction';
 import { Cast, Col, Fn, Json, Literal, Where } from './utils';
-// tslint:disable-next-line:no-duplicate-imports
-import * as Utils from './utils';
-import { validator } from './utils/validator-extras';
 import { ConnectionManager } from './connection-manager';
+
+/**
+ * Additional options for table altering during sync
+ */
+export interface SyncAlterOptions {
+  /**
+   * Prevents any drop statements while altering a table when set to `false`
+   */
+  drop?: boolean;
+}
 
 /**
  * Sync Options
  */
-export interface SyncOptions extends Logging {
+export interface SyncOptions extends Logging, Hookable {
   /**
    * If force is true, each DAO will do DROP TABLE IF EXISTS ..., before it tries to create its own table
    */
   force?: boolean;
+
+  /**
+   * If alter is true, each DAO will do ALTER TABLE ... CHANGE ...
+   * Alters tables to fit models. Provide an object for additional configuration. Not recommended for production use. If not further configured deletes data in columns that were removed or had their type changed in the model.
+   */
+  alter?: boolean | SyncAlterOptions;
 
   /**
    * Match a regex against the database name before syncing, a safety check for cases where force: true is
@@ -48,12 +60,18 @@ export interface SyncOptions extends Logging {
   match?: RegExp;
 
   /**
-   * The schema that the tables should be created in. This can be overriden for each table in sequelize.define
+   * The schema that the tables should be created in. This can be overridden for each table in sequelize.define
    */
   schema?: string;
+
+  /**
+   * An optional parameter to specify the schema search_path (Postgres only)
+   */
+  searchPath?: string;
+
 }
 
-export interface DefaultSetOptions {}
+export interface DefaultSetOptions { }
 
 /**
  * Connection Pool options
@@ -80,31 +98,37 @@ export interface PoolOptions {
   acquire?: number;
 
   /**
+   * The time interval, in milliseconds, after which sequelize-pool will remove idle connections.
+   */
+  evict?: number;
+
+  /**
+   * The number of times to use a connection before closing and replacing it.  Default is Infinity
+   */
+  maxUses?: number;
+
+  /**
    * A function that validates a connection. Called with client. The default function checks that client is an
    * object, and that its state is not disconnected
    */
-  validate?(client?: any): boolean;
+  validate?(client?: unknown): boolean;
+}
+
+export interface ConnectionOptions {
+  host?: string;
+  port?: string | number;
+  username?: string;
+  password?: string;
+  database?: string;
 }
 
 /**
  * Interface for replication Options in the sequelize constructor
  */
 export interface ReplicationOptions {
-  read?: {
-    host?: string;
-    port?: string | number;
-    username?: string;
-    password?: string;
-    database?: string;
-  };
+  read: ConnectionOptions[];
 
-  write?: {
-    host?: string;
-    port?: string | number;
-    username?: string;
-    password?: string;
-    database?: string;
-  };
+  write: ConnectionOptions;
 }
 
 /**
@@ -119,6 +143,7 @@ export interface OperatorsAliases {
  */
 export interface Config {
   readonly database: string;
+  readonly dialectModule?: object;
   readonly host?: string;
   readonly port?: string;
   readonly username: string;
@@ -131,7 +156,7 @@ export interface Config {
   };
   readonly protocol: 'tcp';
   readonly native: boolean;
-  readonly ssl: any;
+  readonly ssl: boolean;
   readonly replication: boolean;
   readonly dialectModulePath: null | string;
   readonly keepDefaultTimezone?: boolean;
@@ -141,7 +166,12 @@ export interface Config {
   };
 }
 
-export type Dialect =  'mysql' | 'postgres' | 'sqlite' | 'mariadb' | 'mssql' | 'mariadb';
+export type Dialect = 'mysql' | 'postgres' | 'sqlite' | 'mariadb' | 'mssql';
+
+export interface RetryOptions {
+  match?: (RegExp | string | Function)[];
+  max?: number;
+}
 
 /**
  * Options for the constructor of Sequelize main class
@@ -153,6 +183,15 @@ export interface Options extends Logging {
    * @default 'mysql'
    */
   dialect?: Dialect;
+
+  /**
+   * If specified, will use the provided module as the dialect.
+   *
+   * @example
+   * `dialectModule: require('@myorg/tedious'),`
+   */
+  dialectModule?: object;
+
 
   /**
    * If specified, load the dialect library from this path. For example, if you want to use pg.js instead of
@@ -212,7 +251,7 @@ export interface Options extends Logging {
   protocol?: string;
 
   /**
-   * Default options for model definitions. See sequelize.define for options
+   * Default options for model definitions. See Model.init.
    */
   define?: ModelOptions;
 
@@ -297,27 +336,54 @@ export interface Options extends Logging {
   typeValidation?: boolean;
 
   /**
-   * Sets available operator aliases. See (http://docs.sequelizejs.com/manual/tutorial/querying.html#operators)
-   * for more information. Set to false to disable operator aliases completely (recommended)
+   * Sets available operator aliases.
+   * See (https://sequelize.org/master/manual/querying.html#operators) for more information.
+   * WARNING: Setting this to boolean value was deprecated and is no-op.
    *
    * @default all aliases
    */
-  operatorsAliases?: OperatorsAliases | false;
+  operatorsAliases?: OperatorsAliases;
+
+
+  /**
+   * The PostgreSQL `standard_conforming_strings` session parameter. Set to `false` to not set the option.
+   * WARNING: Setting this to false may expose vulnerabilities and is not recommended!
+   *
+   * @default true
+   */
+  standardConformingStrings?: boolean;
 
   /**
    * Sets global permanent hooks.
    */
-  hooks?: Partial<SequelizeHooks>
+  hooks?: Partial<SequelizeHooks>;
+
+  /**
+   * Set to `true` to automatically minify aliases generated by sequelize.
+   * Mostly useful to circumvent the POSTGRES alias limit of 64 characters.
+   *
+   * @default false
+   */
+  minifyAliases?: boolean;
+
+  /**
+   * Set to `true` to show bind patameters in log.
+   *
+   * @default false
+   */
+  logQueryParameters?: boolean;
+
+  retry?: RetryOptions;
 }
 
-export interface QueryOptionsTransactionRequired {}
+export interface QueryOptionsTransactionRequired { }
 
 /**
  * This is the main class, the entry point to sequelize. To use it, you just need to
  * import sequelize:
  *
  * ```js
- * var Sequelize = require('sequelize');
+ * const Sequelize = require('sequelize');
  * ```
  *
  * In addition to sequelize, the connection library for the dialect you want to use
@@ -485,6 +551,24 @@ export class Sequelize extends Hooks {
   public static afterUpdate(fn: (instance: Model, options: UpdateOptions) => void): void;
 
   /**
+   * A hook that is run before creating or updating a single instance, It proxies `beforeCreate` and `beforeUpdate`
+   *
+   * @param name
+   * @param fn A callback function that is called with instance, options
+   */
+  public static beforeSave(name: string, fn: (instance: Model, options: UpdateOptions | CreateOptions) => void): void;
+  public static beforeSave(fn: (instance: Model, options: UpdateOptions | CreateOptions) => void): void;
+
+  /**
+   * A hook that is run after creating or updating a single instance, It proxies `afterCreate` and `afterUpdate`
+   *
+   * @param name
+   * @param fn A callback function that is called with instance, options
+   */
+  public static afterSave(name: string, fn: (instance: Model, options: UpdateOptions | CreateOptions) => void): void;
+  public static afterSave(fn: (instance: Model, options: UpdateOptions | CreateOptions) => void): void;
+
+  /**
    * A hook that is run before creating instances in bulk
    *
    * @param name
@@ -548,6 +632,42 @@ export class Sequelize extends Hooks {
   public static beforeFind(fn: (options: FindOptions) => void): void;
 
   /**
+   * A hook that is run before a connection is established
+   *
+   * @param name
+   * @param fn   A callback function that is called with options
+   */
+  public static beforeConnect(name: string, fn: (options: Config) => void): void;
+  public static beforeConnect(fn: (options: Config) => void): void;
+
+  /**
+   * A hook that is run after a connection is established
+   *
+   * @param name
+   * @param fn   A callback function that is called with options
+   */
+  public static afterConnect(name: string, fn: (connection: unknown, options: Config) => void): void;
+  public static afterConnect(fn: (connection: unknown, options: Config) => void): void;
+
+  /**
+   * A hook that is run before a connection is released
+   *
+   * @param name
+   * @param fn   A callback function that is called with options
+   */
+  public static beforeDisconnect(name: string, fn: (connection: unknown) => void): void;
+  public static beforeDisconnect(fn: (connection: unknown) => void): void;
+
+  /**
+   * A hook that is run after a connection is released
+   *
+   * @param name
+   * @param fn   A callback function that is called with options
+   */
+  public static afterDisconnect(name: string, fn: (connection: unknown) => void): void;
+  public static afterDisconnect(fn: (connection: unknown) => void): void;
+
+  /**
    * A hook that is run before a find (select) query, after any { include: {all: ...} } options are expanded
    *
    * @param name
@@ -573,10 +693,10 @@ export class Sequelize extends Hooks {
    */
   public static afterFind(
     name: string,
-    fn: (instancesOrInstance: Model[] | Model, options: FindOptions) => void
+    fn: (instancesOrInstance: Model[] | Model | null, options: FindOptions) => void
   ): void;
   public static afterFind(
-    fn: (instancesOrInstance: Model[] | Model, options: FindOptions) => void
+    fn: (instancesOrInstance: Model[] | Model | null, options: FindOptions) => void
   ): void;
 
   /**
@@ -649,6 +769,15 @@ export class Sequelize extends Hooks {
   public static afterSync(fn: (options: SyncOptions) => HookReturn): void;
 
   /**
+   * Use CLS with Sequelize.
+   * CLS namespace provided is stored as `Sequelize._cls`
+   * and Promise is patched to use the namespace, using `cls-hooked` module.
+   *
+   * @param namespace
+   */
+  public static useCLS(namespace: object): typeof Sequelize;
+
+  /**
    * A reference to Sequelize constructor from sequelize. Useful for accessing DataTypes, Errors etc.
    */
   public Sequelize: typeof Sequelize;
@@ -663,25 +792,32 @@ export class Sequelize extends Hooks {
   public readonly connectionManager: ConnectionManager;
 
   /**
+   * Dictionary of all models linked with this instance.
+   */
+  public readonly models: {
+    [key: string]: ModelCtor<Model>;
+  };
+
+  /**
    * Instantiate sequelize with name of database, username and password
    *
    * #### Example usage
    *
    * ```javascript
    * // without password and options
-   * var sequelize = new Sequelize('database', 'username')
+   * const sequelize = new Sequelize('database', 'username')
    *
    * // without options
-   * var sequelize = new Sequelize('database', 'username', 'password')
+   * const sequelize = new Sequelize('database', 'username', 'password')
    *
    * // without password / with blank password
-   * var sequelize = new Sequelize('database', 'username', null, {})
+   * const sequelize = new Sequelize('database', 'username', null, {})
    *
    * // with password and options
-   * var sequelize = new Sequelize('my_database', 'john', 'doe', {})
+   * const sequelize = new Sequelize('my_database', 'john', 'doe', {})
    *
    * // with uri (see below)
-   * var sequelize = new Sequelize('mysql://localhost:3306/database', {})
+   * const sequelize = new Sequelize('mysql://localhost:3306/database', {})
    * ```
    *
    * @param database The name of the database
@@ -863,9 +999,9 @@ export class Sequelize extends Hooks {
    */
   public afterFind(
     name: string,
-    fn: (instancesOrInstance: Model[] | Model, options: FindOptions) => void
+    fn: (instancesOrInstance: Model[] | Model | null, options: FindOptions) => void
   ): void;
-  public afterFind(fn: (instancesOrInstance: Model[] | Model, options: FindOptions) => void): void;
+  public afterFind(fn: (instancesOrInstance: Model[] | Model | null, options: FindOptions) => void): void;
 
   /**
    * A hook that is run before a define call
@@ -937,6 +1073,12 @@ export class Sequelize extends Hooks {
   public getDialect(): string;
 
   /**
+   * Returns the database name.
+   */
+
+  public getDatabaseName(): string;
+
+  /**
    * Returns an instance of QueryInterface.
    */
   public getQueryInterface(): QueryInterface;
@@ -949,7 +1091,8 @@ export class Sequelize extends Hooks {
    * represents a column. A short table definition might look like this:
    *
    * ```js
-   * sequelize.define('modelName', {
+   * class MyModel extends Model {}
+   * MyModel.init({
    *   columnA: {
    *     type: Sequelize.BOOLEAN,
    *     validate: {
@@ -965,7 +1108,7 @@ export class Sequelize extends Hooks {
    *   },
    *   columnB: Sequelize.STRING,
    *   columnC: 'MY VERY OWN COLUMN TYPE'
-   * })
+   * }, { sequelize })
    *
    * sequelize.models.modelName // The model will now be available in models under the name given to define
    * ```
@@ -976,16 +1119,16 @@ export class Sequelize extends Hooks {
    * getters.
    *
    * For a list of possible data types, see
-   * http://docs.sequelizejs.com/en/latest/docs/models-definition/#data-types
+   * https://sequelize.org/master/en/latest/docs/models-definition/#data-types
    *
    * For more about getters and setters, see
-   * http://docs.sequelizejs.com/en/latest/docs/models-definition/#getters-setters
+   * https://sequelize.org/master/en/latest/docs/models-definition/#getters-setters
    *
    * For more about instance and class methods, see
-   * http://docs.sequelizejs.com/en/latest/docs/models-definition/#expansion-of-models
+   * https://sequelize.org/master/en/latest/docs/models-definition/#expansion-of-models
    *
    * For more about validation, see
-   * http://docs.sequelizejs.com/en/latest/docs/models-definition/#validations
+   * https://sequelize.org/master/en/latest/docs/models-definition/#validations
    *
    * @param modelName  The name of the model. The model will be stored in `sequelize.models` under this name
    * @param attributes An object, where each attribute is a column of the table. Each column can be either a
@@ -1000,7 +1143,7 @@ export class Sequelize extends Hooks {
    *
    * @param modelName The name of a model defined with Sequelize.define
    */
-  public model(modelName: string): typeof Model;
+  public model(modelName: string): ModelCtor<Model>;
 
   /**
    * Checks whether a model with the given name is defined
@@ -1031,50 +1174,44 @@ export class Sequelize extends Hooks {
   ): T;
 
   /**
-   * Execute a query on the DB, with the posibility to bypass all the sequelize goodness.
+   * Execute a query on the DB, optionally bypassing all the Sequelize goodness.
    *
    * By default, the function will return two arguments: an array of results, and a metadata object,
-   * containing number of affected rows etc. Use `.spread` to access the results.
+   * containing number of affected rows etc. Use `const [results, meta] = await ...` to access the results.
    *
    * If you are running a type of query where you don't need the metadata, for example a `SELECT` query, you
    * can pass in a query type to make sequelize format the results:
    *
    * ```js
-   * sequelize.query('SELECT...').spread(function (results, metadata) {
-   *   // Raw query - use spread
-   * });
+   * const [results, metadata] = await sequelize.query('SELECT...'); // Raw query - use array destructuring
    *
-   * sequelize.query('SELECT...', { type: sequelize.QueryTypes.SELECT }).then(function (results) {
-   *   // SELECT query - use then
-   * })
+   * const results = await sequelize.query('SELECT...', { type: sequelize.QueryTypes.SELECT }); // SELECT query - no destructuring
    * ```
    *
    * @param sql
    * @param options Query options
    */
-  public query(sql: string | { query: string; values: any[] }, options: QueryOptionsWithType<QueryTypes.UPDATE>): Promise<[undefined, number]>;
-  public query(sql: string | { query: string; values: any[] }, options: QueryOptionsWithType<QueryTypes.BULKUPDATE>): Promise<number>;
-  public query(sql: string | { query: string; values: any[] }, options: QueryOptionsWithType<QueryTypes.INSERT>): Promise<[number, number]>;
-  public query(sql: string | { query: string; values: any[] }, options: QueryOptionsWithType<QueryTypes.UPSERT>): Promise<number>;
-  public query(sql: string | { query: string; values: any[] }, options: QueryOptionsWithType<QueryTypes.DELETE>): Promise<void>;
-  public query(sql: string | { query: string; values: any[] }, options: QueryOptionsWithType<QueryTypes.BULKDELETE>): Promise<number>;
-  public query(sql: string | { query: string; values: any[] }, options: QueryOptionsWithType<QueryTypes.SHOWTABLES>): Promise<string[]>;
-  public query(sql: string | { query: string; values: any[] }, options: QueryOptionsWithType<QueryTypes.DESCRIBE>): Promise<{
-    [key: string]: {
-      type: string;
-      allowNull: boolean;
-      defaultValue: string;
-      primaryKey: boolean;
-      autoIncrement: boolean;
-      comment: string | null;
-    }
-  }>;
+  public query(sql: string | { query: string; values: unknown[] }, options: QueryOptionsWithType<QueryTypes.UPDATE>): Promise<[undefined, number]>;
+  public query(sql: string | { query: string; values: unknown[] }, options: QueryOptionsWithType<QueryTypes.BULKUPDATE>): Promise<number>;
+  public query(sql: string | { query: string; values: unknown[] }, options: QueryOptionsWithType<QueryTypes.INSERT>): Promise<[number, number]>;
+  public query(sql: string | { query: string; values: unknown[] }, options: QueryOptionsWithType<QueryTypes.UPSERT>): Promise<number>;
+  public query(sql: string | { query: string; values: unknown[] }, options: QueryOptionsWithType<QueryTypes.DELETE>): Promise<void>;
+  public query(sql: string | { query: string; values: unknown[] }, options: QueryOptionsWithType<QueryTypes.BULKDELETE>): Promise<number>;
+  public query(sql: string | { query: string; values: unknown[] }, options: QueryOptionsWithType<QueryTypes.SHOWTABLES>): Promise<string[]>;
+  public query(sql: string | { query: string; values: unknown[] }, options: QueryOptionsWithType<QueryTypes.DESCRIBE>): Promise<ColumnsDescription>;
   public query<M extends Model>(
-    sql: string | { query: string; values: any[] },
+    sql: string | { query: string; values: unknown[] },
     options: QueryOptionsWithModel
   ): Promise<M[]>;
-  public query<T extends object>(sql: string | { query: string; values: any[] }, options: QueryOptionsWithType<QueryTypes.SELECT>): Promise<T[]>;
-  public query(sql: string | { query: string; values: any[] }, options?: QueryOptions | QueryOptionsWithType<QueryTypes.RAW>): Promise<unknown[]>;
+  public query<T extends object>(sql: string | { query: string; values: unknown[] }, options: QueryOptionsWithType<QueryTypes.SELECT> & { plain: true }): Promise<T>;
+  public query<T extends object>(sql: string | { query: string; values: unknown[] }, options: QueryOptionsWithType<QueryTypes.SELECT>): Promise<T[]>;
+  public query(sql: string | { query: string; values: unknown[] }, options: (QueryOptions | QueryOptionsWithType<QueryTypes.RAW>) & { plain: true }): Promise<{ [key: string]: unknown }>;
+  public query(sql: string | { query: string; values: unknown[] }, options?: QueryOptions | QueryOptionsWithType<QueryTypes.RAW>): Promise<[unknown[], unknown]>;
+
+  /**
+   * Get the fn for random based on the dialect
+   */
+  public random(): Fn;
 
   /**
    * Execute a query which would set an environment or user variable. The variables are set per connection,
@@ -1175,12 +1312,14 @@ export class Sequelize extends Hooks {
    * in order for the query to happen under that transaction
    *
    * ```js
-   * sequelize.transaction().then(function (t) {
-   *   return User.findOne(..., { transaction: t}).then(function (user) {
-   *   return user.update(..., { transaction: t});
-   *   })
-   *   .then(t.commit.bind(t))
-   *   .catch(t.rollback.bind(t));
+   *   try {
+   *     const transaction = await sequelize.transaction();
+   *     const user = await User.findOne(..., { transaction });
+   *     await user.update(..., { transaction });
+   *     await transaction.commit();
+   *   } catch(err) {
+   *     await transaction.rollback();
+   *   }
    * })
    * ```
    *
@@ -1188,27 +1327,27 @@ export class Sequelize extends Hooks {
    * supported:
    *
    * ```js
-   * sequelize.transaction(function (t) { // Note that we use a callback rather than a promise.then()
-   *   return User.findOne(..., { transaction: t}).then(function (user) {
-   *   return user.update(..., { transaction: t});
+   * try {
+   *   await sequelize.transaction(transaction => { // Note that we pass a callback rather than awaiting the call with no arguments
+   *     const user = await User.findOne(..., {transaction});
+   *     await user.update(..., {transaction});
    *   });
-   * }).then(function () {
-   *   // Commited
-   * }).catch(function (err) {
+   *   // Committed
+   * } catch(err) {
    *   // Rolled back
    *   console.error(err);
-   * });
+   * }
    * ```
    *
-   * If you have [CLS](https://github.com/othiym23/node-continuation-local-storage) enabled, the transaction
+   * If you have [CLS](https://github.com/Jeff-Lewis/cls-hooked) enabled, the transaction
    * will automatically be passed to any query that runs witin the callback. To enable CLS, add it do your
    * project, create a namespace and set it on the sequelize constructor:
    *
    * ```js
-   * var cls = require('continuation-local-storage'),
-   *   ns = cls.createNamespace('....');
-   * var Sequelize = require('sequelize');
-   * Sequelize.cls = ns;
+   * const cls = require('cls-hooked');
+   * const namespace = cls.createNamespace('....');
+   * const Sequelize = require('sequelize');
+   * Sequelize.useCLS(namespace);
    * ```
    * Note, that CLS is enabled for all sequelize instances, and all instances will share the same namespace
    *
@@ -1226,7 +1365,7 @@ export class Sequelize extends Hooks {
    * Normally this is done on process exit, so you only need to call this method if you are creating multiple
    * instances, and want to garbage collect some of them.
    */
-  public close(): void;
+  public close(): Promise<void>;
 
   /**
    * Returns the database version
@@ -1251,7 +1390,7 @@ export class Sequelize extends Hooks {
  * @param fn The function you want to call
  * @param args All further arguments will be passed as arguments to the function
  */
-export function fn(fn: string, ...args: any[]): Fn;
+export function fn(fn: string, ...args: unknown[]): Fn;
 
 /**
  * Creates a object representing a column in the DB. This is often useful in conjunction with
@@ -1267,14 +1406,14 @@ export function col(col: string): Col;
  * @param val The value to cast
  * @param type The type to cast it to
  */
-export function cast(val: any, type: string): Cast;
+export function cast(val: unknown, type: string): Cast;
 
 /**
  * Creates a object representing a literal, i.e. something that will not be escaped.
  *
  * @param val
  */
-export function literal(val: any): Literal;
+export function literal(val: string): Literal;
 
 /**
  * An AND query
@@ -1301,7 +1440,7 @@ export function or(...args: (WhereOperators | WhereAttributeHash | Where)[]): Or
 export function json(conditionsOrPath: string | object, value?: string | number | boolean): Json;
 
 export type AttributeType = Fn | Col | Literal | ModelAttributeColumnOptions | string;
-export type LogicType = Fn | Col | Literal | OrOperator | AndOperator | string;
+export type LogicType = Fn | Col | Literal | OrOperator | AndOperator | WhereOperators | string | symbol | null;
 
 /**
  * A way of specifying attr = condition.
@@ -1321,7 +1460,7 @@ export type LogicType = Fn | Col | Literal | OrOperator | AndOperator | string;
  * @param logic The condition. Can be both a simply type, or a further condition (`.or`, `.and`, `.literal`
  *   etc.)
  */
-export function where(attr: AttributeType, comparator: string, logic: LogicType): Where;
+export function where(attr: AttributeType, comparator: string | symbol, logic: LogicType): Where;
 export function where(attr: AttributeType, logic: LogicType): Where;
 
 export default Sequelize;

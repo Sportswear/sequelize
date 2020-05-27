@@ -10,16 +10,16 @@ const current = Support.sequelize;
 
 describe('Transaction', () => {
   before(function() {
-    this.stub = sinon.stub(current, 'query').returns(Sequelize.Promise.resolve({}));
+    this.stub = sinon.stub(current, 'query').resolves({});
 
     this.stubConnection = sinon.stub(current.connectionManager, 'getConnection')
-      .returns(Sequelize.Promise.resolve({
+      .resolves({
         uuid: 'ssfdjd-434fd-43dfg23-2d',
         close() {}
-      }));
+      });
 
     this.stubRelease = sinon.stub(current.connectionManager, 'releaseConnection')
-      .returns(Sequelize.Promise.resolve());
+      .resolves();
   });
 
   beforeEach(function() {
@@ -33,7 +33,7 @@ describe('Transaction', () => {
     this.stubConnection.restore();
   });
 
-  it('should run auto commit query only when needed', function() {
+  it('should run auto commit query only when needed', async function() {
     const expectations = {
       all: [
         'START TRANSACTION;'
@@ -45,9 +45,33 @@ describe('Transaction', () => {
         'BEGIN TRANSACTION;'
       ]
     };
-    return current.transaction(() => {
+
+    await current.transaction(async () => {
       expect(this.stub.args.map(arg => arg[0])).to.deep.equal(expectations[dialect] || expectations.all);
-      return Sequelize.Promise.resolve();
+    });
+  });
+
+  it('should set isolation level correctly', async function() {
+    const expectations = {
+      all: [
+        'SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;',
+        'START TRANSACTION;'
+      ],
+      postgres: [
+        'START TRANSACTION;',
+        'SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;'
+      ],
+      sqlite: [
+        'BEGIN DEFERRED TRANSACTION;',
+        'PRAGMA read_uncommitted = ON;'
+      ],
+      mssql: [
+        'BEGIN TRANSACTION;'
+      ]
+    };
+
+    await current.transaction({ isolationLevel: Sequelize.Transaction.ISOLATION_LEVELS.READ_UNCOMMITTED }, async () => {
+      expect(this.stub.args.map(arg => arg[0])).to.deep.equal(expectations[dialect] || expectations.all);
     });
   });
 });

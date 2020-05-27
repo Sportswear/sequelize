@@ -5,8 +5,6 @@ const sinon = require('sinon');
 const expect = chai.expect;
 const stub = sinon.stub;
 const _ = require('lodash');
-const Sequelize = require('../../../index');
-const Promise = Sequelize.Promise;
 const Support = require('../support');
 const DataTypes = require('../../../lib/data-types');
 const BelongsTo = require('../../../lib/associations/belongs-to');
@@ -121,7 +119,7 @@ describe(Support.getTestDialectTeaser('belongsToMany'), () => {
 
   describe('timestamps', () => {
     it('follows the global timestamps true option', () => {
-      const User =current.define('User', {}),
+      const User = current.define('User', {}),
         Task = current.define('Task', {});
 
       User.belongsToMany(Task, { through: 'user_task1' });
@@ -130,7 +128,7 @@ describe(Support.getTestDialectTeaser('belongsToMany'), () => {
     });
 
     it('allows me to override the global timestamps option', () => {
-      const User =current.define('User', {}),
+      const User = current.define('User', {}),
         Task = current.define('Task', {});
 
       User.belongsToMany(Task, { through: 'user_task2', timestamps: false });
@@ -143,7 +141,7 @@ describe(Support.getTestDialectTeaser('belongsToMany'), () => {
         timestamps: false
       });
 
-      const User =current.define('User', {}),
+      const User = current.define('User', {}),
         Task = current.define('Task', {});
 
       User.belongsToMany(Task, { through: 'user_task3' });
@@ -153,14 +151,14 @@ describe(Support.getTestDialectTeaser('belongsToMany'), () => {
   });
 
   describe('optimizations using bulk create, destroy and update', () => {
-    const User =current.define('User', { username: DataTypes.STRING }),
+    const User = current.define('User', { username: DataTypes.STRING }),
       Task = current.define('Task', { title: DataTypes.STRING }),
       UserTasks = current.define('UserTasks', {});
 
     User.belongsToMany(Task, { through: UserTasks });
     Task.belongsToMany(User, { through: UserTasks });
 
-    const user =User.build({
+    const user = User.build({
         id: 42
       }),
       task1 = Task.build({
@@ -171,9 +169,9 @@ describe(Support.getTestDialectTeaser('belongsToMany'), () => {
       });
 
     beforeEach(function() {
-      this.findAll = stub(UserTasks, 'findAll').returns(Promise.resolve([]));
-      this.bulkCreate = stub(UserTasks, 'bulkCreate').returns(Promise.resolve([]));
-      this.destroy = stub(UserTasks, 'destroy').returns(Promise.resolve([]));
+      this.findAll = stub(UserTasks, 'findAll').resolves([]);
+      this.bulkCreate = stub(UserTasks, 'bulkCreate').resolves([]);
+      this.destroy = stub(UserTasks, 'destroy').resolves([]);
     });
 
     afterEach(function() {
@@ -182,27 +180,24 @@ describe(Support.getTestDialectTeaser('belongsToMany'), () => {
       this.destroy.restore();
     });
 
-    it('uses one insert into statement', function() {
-      return user.setTasks([task1, task2]).then(() => {
-        expect(this.findAll).to.have.been.calledOnce;
-        expect(this.bulkCreate).to.have.been.calledOnce;
-      });
+    it('uses one insert into statement', async function() {
+      await user.setTasks([task1, task2]);
+      expect(this.findAll).to.have.been.calledOnce;
+      expect(this.bulkCreate).to.have.been.calledOnce;
     });
 
-    it('uses one delete from statement', function() {
+    it('uses one delete from statement', async function() {
       this.findAll
-        .onFirstCall().returns(Promise.resolve([]))
-        .onSecondCall().returns(Promise.resolve([
+        .onFirstCall().resolves([])
+        .onSecondCall().resolves([
           { userId: 42, taskId: 15 },
           { userId: 42, taskId: 16 }
-        ]));
+        ]);
 
-      return user.setTasks([task1, task2]).then(() => {
-        return user.setTasks(null);
-      }).then(() => {
-        expect(this.findAll).to.have.been.calledTwice;
-        expect(this.destroy).to.have.been.calledOnce;
-      });
+      await user.setTasks([task1, task2]);
+      await user.setTasks(null);
+      expect(this.findAll).to.have.been.calledTwice;
+      expect(this.destroy).to.have.been.calledOnce;
     });
   });
 
@@ -226,7 +221,7 @@ describe(Support.getTestDialectTeaser('belongsToMany'), () => {
 
     it('should infer otherKey from paired BTM relationship with a through model defined', function() {
       const User = this.sequelize.define('User', {});
-      const Place = this.sequelize.define('User', {});
+      const Place = this.sequelize.define('Place', {});
       const UserPlace = this.sequelize.define('UserPlace', {
         id: {
           primaryKey: true,
@@ -246,6 +241,51 @@ describe(Support.getTestDialectTeaser('belongsToMany'), () => {
 
       expect(Places.otherKey).to.equal('place_id');
       expect(Users.otherKey).to.equal('user_id');
+
+      expect(Object.keys(UserPlace.rawAttributes).length).to.equal(3); // Defined primary key and two foreign keys
+    });
+  });
+
+  describe('source/target keys', () => {
+    it('should infer targetKey from paired BTM relationship with a through string defined', function() {
+      const User = this.sequelize.define('User', { user_id: DataTypes.UUID });
+      const Place = this.sequelize.define('Place', { place_id: DataTypes.UUID });
+
+      const Places = User.belongsToMany(Place, { through: 'user_places', sourceKey: 'user_id' });
+      const Users = Place.belongsToMany(User, { through: 'user_places', sourceKey: 'place_id' });
+
+      expect(Places.paired).to.equal(Users);
+      expect(Users.paired).to.equal(Places);
+
+      expect(Places.sourceKey).to.equal('user_id');
+      expect(Users.sourceKey).to.equal('place_id');
+
+      expect(Places.targetKey).to.equal('place_id');
+      expect(Users.targetKey).to.equal('user_id');
+    });
+
+    it('should infer targetKey from paired BTM relationship with a through model defined', function() {
+      const User = this.sequelize.define('User', { user_id: DataTypes.UUID });
+      const Place = this.sequelize.define('Place', { place_id: DataTypes.UUID });
+      const UserPlace = this.sequelize.define('UserPlace', {
+        id: {
+          primaryKey: true,
+          type: DataTypes.INTEGER,
+          autoIncrement: true
+        }
+      }, { timestamps: false });
+
+      const Places = User.belongsToMany(Place, { through: UserPlace, sourceKey: 'user_id' });
+      const Users = Place.belongsToMany(User, { through: UserPlace, sourceKey: 'place_id' });
+
+      expect(Places.paired).to.equal(Users);
+      expect(Users.paired).to.equal(Places);
+
+      expect(Places.sourceKey).to.equal('user_id');
+      expect(Users.sourceKey).to.equal('place_id');
+
+      expect(Places.targetKey).to.equal('place_id');
+      expect(Users.targetKey).to.equal('user_id');
 
       expect(Object.keys(UserPlace.rawAttributes).length).to.equal(3); // Defined primary key and two foreign keys
     });
@@ -289,7 +329,7 @@ describe(Support.getTestDialectTeaser('belongsToMany'), () => {
       expect(Object.keys(ProductTag.rawAttributes)).to.deep.equal(['id', 'priority', 'productId', 'tagId']);
     });
 
-    it('should setup hasOne relations to source and target from join model with defined foreign/other keys', function() {
+    it('should setup hasMany relations to source and target from join model with defined foreign/other keys', function() {
       const Product = this.sequelize.define('Product', {
           title: DataTypes.STRING
         }),
@@ -361,6 +401,45 @@ describe(Support.getTestDialectTeaser('belongsToMany'), () => {
 
       expect(Object.keys(ProductTag.rawAttributes).length).to.equal(4);
       expect(Object.keys(ProductTag.rawAttributes)).to.deep.equal(['id', 'priority', 'productId', 'tagId']);
+    });
+
+    it('should setup hasOne relations to source and target from join model with defined source keys', function() {
+      const Product = this.sequelize.define('Product', {
+          title: DataTypes.STRING,
+          productSecondaryId: DataTypes.STRING
+        }),
+        Tag = this.sequelize.define('Tag', {
+          name: DataTypes.STRING,
+          tagSecondaryId: DataTypes.STRING
+        }),
+        ProductTag = this.sequelize.define('ProductTag', {
+          id: {
+            primaryKey: true,
+            type: DataTypes.INTEGER,
+            autoIncrement: true
+          },
+          priority: DataTypes.INTEGER
+        }, {
+          timestamps: false
+        });
+
+      Product.Tags = Product.belongsToMany(Tag, { through: ProductTag, sourceKey: 'productSecondaryId' });
+      Tag.Products = Tag.belongsToMany(Product, { through: ProductTag, sourceKey: 'tagSecondaryId' });
+
+      expect(Product.Tags.oneFromSource).to.be.an.instanceOf(HasOne);
+      expect(Product.Tags.oneFromTarget).to.be.an.instanceOf(HasOne);
+
+      expect(Tag.Products.oneFromSource).to.be.an.instanceOf(HasOne);
+      expect(Tag.Products.oneFromTarget).to.be.an.instanceOf(HasOne);
+
+      expect(Tag.Products.oneFromSource.sourceKey).to.equal(Tag.Products.sourceKey);
+      expect(Tag.Products.oneFromTarget.sourceKey).to.equal(Tag.Products.targetKey);
+
+      expect(Product.Tags.oneFromSource.sourceKey).to.equal(Product.Tags.sourceKey);
+      expect(Product.Tags.oneFromTarget.sourceKey).to.equal(Product.Tags.targetKey);
+
+      expect(Object.keys(ProductTag.rawAttributes).length).to.equal(4);
+      expect(Object.keys(ProductTag.rawAttributes)).to.deep.equal(['id', 'priority', 'ProductProductSecondaryId', 'TagTagSecondaryId']);
     });
 
     it('should setup belongsTo relations to source and target from join model with only foreign keys defined', function() {
@@ -499,7 +578,7 @@ describe(Support.getTestDialectTeaser('belongsToMany'), () => {
 
   describe('self-associations', () => {
     it('does not pair multiple self associations with different through arguments', () => {
-      const User =current.define('user', {}),
+      const User = current.define('user', {}),
         UserFollowers = current.define('userFollowers', {}),
         Invite = current.define('invite', {});
 
@@ -521,7 +600,7 @@ describe(Support.getTestDialectTeaser('belongsToMany'), () => {
     });
 
     it('correctly generates a foreign/other key when none are defined', () => {
-      const User =current.define('user', {}),
+      const User = current.define('user', {}),
         UserFollowers = current.define('userFollowers', {
           id: {
             type: DataTypes.INTEGER,

@@ -7,7 +7,7 @@ const Support = require('../support'),
   _ = require('lodash'),
   expectsql = Support.expectsql,
   current = Support.sequelize,
-  sql = current.dialect.QueryGenerator,
+  sql = current.dialect.queryGenerator,
   Op = Support.Sequelize.Op;
 
 // Notice: [] will be replaced by dialect specific tick/quote character when there is not dialect specific expectation but only a default expectation
@@ -20,7 +20,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
         options = undefined;
       }
 
-      it(util.inspect(params, { depth: 10 })+(options && `, ${util.inspect(options)}` || ''), () => {
+      it(util.inspect(params, { depth: 10 }) + (options && `, ${util.inspect(options)}` || ''), () => {
         const sqlOrError = _.attempt(sql.whereQuery.bind(sql), params, options);
         return expectsql(sqlOrError, expectation);
       });
@@ -54,8 +54,8 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
       default: 'WHERE [User].[id] = 1'
     });
 
-    it("{ id: 1 }, { prefix: current.literal(sql.quoteTable.call(current.dialect.QueryGenerator, {schema: 'yolo', tableName: 'User'})) }", () => {
-      expectsql(sql.whereQuery({ id: 1 }, { prefix: current.literal(sql.quoteTable.call(current.dialect.QueryGenerator, { schema: 'yolo', tableName: 'User' })) }), {
+    it("{ id: 1 }, { prefix: current.literal(sql.quoteTable.call(current.dialect.queryGenerator, {schema: 'yolo', tableName: 'User'})) }", () => {
+      expectsql(sql.whereQuery({ id: 1 }, { prefix: current.literal(sql.quoteTable.call(current.dialect.queryGenerator, { schema: 'yolo', tableName: 'User' })) }), {
         default: 'WHERE [yolo.User].[id] = 1',
         postgres: 'WHERE "yolo"."User"."id" = 1',
         mariadb: 'WHERE `yolo`.`User`.`id` = 1',
@@ -118,7 +118,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
       mssql: '[deleted] IS NULL'
     });
 
-    describe('$in', () => {
+    describe('Op.in', () => {
       testsql('equipment', {
         [Op.in]: [1, 3]
       }, {
@@ -156,7 +156,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
       });
     });
 
-    describe('$not', () => {
+    describe('Op.not', () => {
       testsql('deleted', {
         [Op.not]: true
       }, {
@@ -178,7 +178,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
       });
     });
 
-    describe('$notIn', () => {
+    describe('Op.notIn', () => {
       testsql('equipment', {
         [Op.notIn]: []
       }, {
@@ -200,7 +200,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
       });
     });
 
-    describe('$ne', () => {
+    describe('Op.ne', () => {
       testsql('email', {
         [Op.ne]: 'jack.bauer@gmail.com'
       }, {
@@ -209,8 +209,8 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
       });
     });
 
-    describe('$and/$or/$not', () => {
-      describe('$or', () => {
+    describe('Op.and/Op.or/Op.not', () => {
+      describe('Op.or', () => {
         testsql('email', {
           [Op.or]: ['maker@mhansen.io', 'janzeh@gmail.com']
         }, {
@@ -292,7 +292,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
         });
       });
 
-      describe('$and', () => {
+      describe('Op.and', () => {
         testsql(Op.and, {
           [Op.or]: {
             group_id: 1,
@@ -345,7 +345,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
         });
       });
 
-      describe('$not', () => {
+      describe('Op.not', () => {
         testsql(Op.not, {
           [Op.or]: {
             group_id: 1,
@@ -366,7 +366,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
       });
     });
 
-    describe('$col', () => {
+    describe('Op.col', () => {
       testsql('userId', {
         [Op.col]: 'user.id'
       }, {
@@ -409,7 +409,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
       });
     });
 
-    describe('$gt', () => {
+    describe('Op.gt', () => {
       testsql('rank', {
         [Op.gt]: 2
       }, {
@@ -425,7 +425,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
       });
     });
 
-    describe('$like', () => {
+    describe('Op.like', () => {
       testsql('username', {
         [Op.like]: '%swagger'
       }, {
@@ -434,39 +434,84 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
       });
     });
 
-    describe('$startsWith', () => {
+    describe('Op.startsWith', () => {
       testsql('username', {
         [Op.startsWith]: 'swagger'
       }, {
-        default: "[username] LIKE '%swagger'",
-        mssql: "[username] LIKE N'%swagger'"
+        default: "[username] LIKE 'swagger%'",
+        mssql: "[username] LIKE N'swagger%'"
       });
-    });
 
-    describe('$endsWith', () => {
       testsql('username', {
-        [Op.endsWith]: 'swagger'
+        [Op.startsWith]: current.literal('swagger')
       }, {
         default: "[username] LIKE 'swagger%'",
         mssql: "[username] LIKE N'swagger%'"
       });
     });
 
-    describe('$substring', () => {
+    describe('Op.endsWith', () => {
+      testsql('username', {
+        [Op.endsWith]: 'swagger'
+      }, {
+        default: "[username] LIKE '%swagger'",
+        mssql: "[username] LIKE N'%swagger'"
+      });
+
+      testsql('username', {
+        [Op.endsWith]: current.literal('swagger')
+      }, {
+        default: "[username] LIKE '%swagger'",
+        mssql: "[username] LIKE N'%swagger'"
+      });
+    });
+
+    describe('Op.substring', () => {
       testsql('username', {
         [Op.substring]: 'swagger'
       }, {
         default: "[username] LIKE '%swagger%'",
         mssql: "[username] LIKE N'%swagger%'"
       });
+
+      testsql('username', {
+        [Op.substring]: current.literal('swagger')
+      }, {
+        default: "[username] LIKE '%swagger%'",
+        mssql: "[username] LIKE N'%swagger%'"
+      });
     });
 
-    describe('$between', () => {
+    describe('Op.between', () => {
       testsql('date', {
         [Op.between]: ['2013-01-01', '2013-01-11']
       }, {
         default: "[date] BETWEEN '2013-01-01' AND '2013-01-11'",
         mssql: "[date] BETWEEN N'2013-01-01' AND N'2013-01-11'"
+      });
+
+      testsql('date', {
+        [Op.between]: [new Date('2013-01-01'), new Date('2013-01-11')]
+      }, {
+        default: "[date] BETWEEN '2013-01-01 00:00:00.000 +00:00' AND '2013-01-11 00:00:00.000 +00:00'",
+        mysql: "`date` BETWEEN '2013-01-01 00:00:00' AND '2013-01-11 00:00:00'",
+        mariadb: "`date` BETWEEN '2013-01-01 00:00:00.000' AND '2013-01-11 00:00:00.000'"
+      });
+
+      testsql('date', {
+        [Op.between]: [1356998400000, 1357862400000]
+      }, {
+        model: {
+          rawAttributes: {
+            date: {
+              type: new DataTypes.DATE()
+            }
+          }
+        }
+      },
+      {
+        default: "[date] BETWEEN '2013-01-01 00:00:00.000 +00:00' AND '2013-01-11 00:00:00.000 +00:00'",
+        mssql: "[date] BETWEEN N'2013-01-01 00:00:00.000 +00:00' AND N'2013-01-11 00:00:00.000 +00:00'"
       });
 
       testsql('date', {
@@ -478,7 +523,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
       });
     });
 
-    describe('$notBetween', () => {
+    describe('Op.notBetween', () => {
       testsql('date', {
         [Op.notBetween]: ['2013-01-01', '2013-01-11']
       }, {
@@ -489,7 +534,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
 
     if (current.dialect.supports.ARRAY) {
       describe('ARRAY', () => {
-        describe('$contains', () => {
+        describe('Op.contains', () => {
           testsql('muscles', {
             [Op.contains]: [2, 3]
           }, {
@@ -511,9 +556,31 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           }, {
             postgres: '"muscles" @> ARRAY[2,5]::INTEGER[]'
           });
+
+          testsql('muscles', {
+            [Op.contains]: ['stringValue1', 'stringValue2', 'stringValue3']
+          }, {
+            postgres: '"muscles" @> ARRAY[\'stringValue1\',\'stringValue2\',\'stringValue3\']'
+          });
+
+          testsql('muscles', {
+            [Op.contained]: ['stringValue1', 'stringValue2', 'stringValue3']
+          }, {
+            postgres: '"muscles" <@ ARRAY[\'stringValue1\',\'stringValue2\',\'stringValue3\']'
+          });
+
+          testsql('muscles', {
+            [Op.contains]: ['stringValue1', 'stringValue2']
+          }, {
+            field: {
+              type: DataTypes.ARRAY(DataTypes.STRING)
+            }
+          }, {
+            postgres: '"muscles" @> ARRAY[\'stringValue1\',\'stringValue2\']::VARCHAR(255)[]'
+          });
         });
 
-        describe('$overlap', () => {
+        describe('Op.overlap', () => {
           testsql('muscles', {
             [Op.overlap]: [3, 11]
           }, {
@@ -521,7 +588,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           });
         });
 
-        describe('$any', () => {
+        describe('Op.any', () => {
           testsql('userId', {
             [Op.any]: [4, 5, 6]
           }, {
@@ -538,7 +605,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
             postgres: '"userId" = ANY (ARRAY[2,5]::INTEGER[])'
           });
 
-          describe('$values', () => {
+          describe('Op.values', () => {
             testsql('userId', {
               [Op.any]: {
                 [Op.values]: [4, 5, 6]
@@ -561,7 +628,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           });
         });
 
-        describe('$all', () => {
+        describe('Op.all', () => {
           testsql('userId', {
             [Op.all]: [4, 5, 6]
           }, {
@@ -578,7 +645,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
             postgres: '"userId" = ALL (ARRAY[2,5]::INTEGER[])'
           });
 
-          describe('$values', () => {
+          describe('Op.values', () => {
             testsql('userId', {
               [Op.all]: {
                 [Op.values]: [4, 5, 6]
@@ -601,7 +668,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           });
         });
 
-        describe('$like', () => {
+        describe('Op.like', () => {
           testsql('userId', {
             [Op.like]: {
               [Op.any]: ['foo', 'bar', 'baz']
@@ -801,18 +868,18 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
         it('sequelize.json("profile.id"), sequelize.cast(2, \'text\')")', function() {
           expectsql(sql.whereItemQuery(undefined, this.sequelize.json('profile.id', this.sequelize.cast('12346-78912', 'text'))), {
             postgres: "(\"profile\"#>>'{id}') = CAST('12346-78912' AS TEXT)",
-            sqlite: "json_extract(`profile`, '$.id') = CAST('12346-78912' AS TEXT)",
+            sqlite: "json_extract(`profile`,'$.id') = CAST('12346-78912' AS TEXT)",
             mariadb: "json_unquote(json_extract(`profile`,'$.id')) = CAST('12346-78912' AS CHAR)",
-            mysql: "`profile`->>'$.id' = CAST('12346-78912' AS CHAR)"
+            mysql: "json_unquote(json_extract(`profile`,'$.\\\"id\\\"')) = CAST('12346-78912' AS CHAR)"
           });
         });
 
         it('sequelize.json({profile: {id: "12346-78912", name: "test"}})', function() {
           expectsql(sql.whereItemQuery(undefined, this.sequelize.json({ profile: { id: '12346-78912', name: 'test' } })), {
             postgres: "(\"profile\"#>>'{id}') = '12346-78912' AND (\"profile\"#>>'{name}') = 'test'",
-            sqlite: "json_extract(`profile`, '$.id') = '12346-78912' AND json_extract(`profile`, '$.name') = 'test'",
-            mariadb: "json_unquote(json_extract(`profile`,'$.id')) = '12346-78912' and json_unquote(json_extract(`profile`,'$.name')) = 'test'",
-            mysql: "`profile`->>'$.id' = '12346-78912' and `profile`->>'$.name' = 'test'"
+            sqlite: "json_extract(`profile`,'$.id') = '12346-78912' AND json_extract(`profile`,'$.name') = 'test'",
+            mariadb: "json_unquote(json_extract(`profile`,'$.id')) = '12346-78912' AND json_unquote(json_extract(`profile`,'$.name')) = 'test'",
+            mysql: "json_unquote(json_extract(`profile`,'$.\\\"id\\\"')) = '12346-78912' AND json_unquote(json_extract(`profile`,'$.\\\"name\\\"')) = 'test'"
           });
         });
 
@@ -827,9 +894,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           prefix: 'User'
         }, {
           mariadb: "json_unquote(json_extract(`User`.`data`,'$.nested.attribute')) = 'value'",
-          mysql: "(`User`.`data`->>'$.\"nested\".\"attribute\"') = 'value'",
+          mysql: "json_unquote(json_extract(`User`.`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) = 'value'",
           postgres: "(\"User\".\"data\"#>>'{nested,attribute}') = 'value'",
-          sqlite: "json_extract(`User`.`data`, '$.nested.attribute') = 'value'"
+          sqlite: "json_extract(`User`.`data`,'$.nested.attribute') = 'value'"
         });
 
         testsql('data', {
@@ -842,9 +909,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           }
         }, {
           mariadb: "CAST(json_unquote(json_extract(`data`,'$.nested')) AS DECIMAL) IN (1, 2)",
-          mysql: "CAST((`data`->>'$.\"nested\"') AS DECIMAL) IN (1, 2)",
+          mysql: "CAST(json_unquote(json_extract(`data`,'$.\\\"nested\\\"')) AS DECIMAL) IN (1, 2)",
           postgres: "CAST((\"data\"#>>'{nested}') AS DOUBLE PRECISION) IN (1, 2)",
-          sqlite: "CAST(json_extract(`data`, '$.nested') AS DOUBLE PRECISION) IN (1, 2)"
+          sqlite: "CAST(json_extract(`data`,'$.nested') AS DOUBLE PRECISION) IN (1, 2)"
         });
 
         testsql('data', {
@@ -857,9 +924,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           }
         }, {
           mariadb: "CAST(json_unquote(json_extract(`data`,'$.nested')) AS DECIMAL) BETWEEN 1 AND 2",
-          mysql: "CAST((`data`->>'$.\"nested\"') AS DECIMAL) BETWEEN 1 AND 2",
+          mysql: "CAST(json_unquote(json_extract(`data`,'$.\\\"nested\\\"')) AS DECIMAL) BETWEEN 1 AND 2",
           postgres: "CAST((\"data\"#>>'{nested}') AS DOUBLE PRECISION) BETWEEN 1 AND 2",
-          sqlite: "CAST(json_extract(`data`, '$.nested') AS DOUBLE PRECISION) BETWEEN 1 AND 2"
+          sqlite: "CAST(json_extract(`data`,'$.nested') AS DOUBLE PRECISION) BETWEEN 1 AND 2"
         });
 
         testsql('data', {
@@ -873,12 +940,12 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           field: {
             type: new DataTypes.JSONB()
           },
-          prefix: current.literal(sql.quoteTable.call(current.dialect.QueryGenerator, { tableName: 'User' }))
+          prefix: current.literal(sql.quoteTable.call(current.dialect.queryGenerator, { tableName: 'User' }))
         }, {
           mariadb: "(json_unquote(json_extract(`User`.`data`,'$.nested.attribute')) = 'value' AND json_unquote(json_extract(`User`.`data`,'$.nested.prop')) != 'None')",
-          mysql: "((`User`.`data`->>'$.\"nested\".\"attribute\"') = 'value' AND (`User`.`data`->>'$.\"nested\".\"prop\"') != 'None')",
+          mysql: "(json_unquote(json_extract(`User`.`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) = 'value' AND json_unquote(json_extract(`User`.`data`,'$.\\\"nested\\\".\\\"prop\\\"')) != 'None')",
           postgres: "((\"User\".\"data\"#>>'{nested,attribute}') = 'value' AND (\"User\".\"data\"#>>'{nested,prop}') != 'None')",
-          sqlite: "(json_extract(`User`.`data`, '$.nested.attribute') = 'value' AND json_extract(`User`.`data`, '$.nested.prop') != 'None')"
+          sqlite: "(json_extract(`User`.`data`,'$.nested.attribute') = 'value' AND json_extract(`User`.`data`,'$.nested.prop') != 'None')"
         });
 
         testsql('data', {
@@ -895,9 +962,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           prefix: 'User'
         }, {
           mariadb: "(json_unquote(json_extract(`User`.`data`,'$.name.last')) = 'Simpson' AND json_unquote(json_extract(`User`.`data`,'$.employment')) != 'None')",
-          mysql: "((`User`.`data`->>'$.\"name\".\"last\"') = 'Simpson' AND (`User`.`data`->>'$.\"employment\"') != 'None')",
+          mysql: "(json_unquote(json_extract(`User`.`data`,'$.\\\"name\\\".\\\"last\\\"')) = 'Simpson' AND json_unquote(json_extract(`User`.`data`,'$.\\\"employment\\\"')) != 'None')",
           postgres: "((\"User\".\"data\"#>>'{name,last}') = 'Simpson' AND (\"User\".\"data\"#>>'{employment}') != 'None')",
-          sqlite: "(json_extract(`User`.`data`, '$.name.last') = 'Simpson' AND json_extract(`User`.`data`, '$.employment') != 'None')"
+          sqlite: "(json_extract(`User`.`data`,'$.name.last') = 'Simpson' AND json_extract(`User`.`data`,'$.employment') != 'None')"
         });
 
         testsql('data', {
@@ -909,9 +976,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           }
         }, {
           mariadb: "(CAST(json_unquote(json_extract(`data`,'$.price')) AS DECIMAL) = 5 AND json_unquote(json_extract(`data`,'$.name')) = 'Product')",
-          mysql: "(CAST((`data`->>'$.\"price\"') AS DECIMAL) = 5 AND (`data`->>'$.\"name\"') = 'Product')",
+          mysql: "(CAST(json_unquote(json_extract(`data`,'$.\\\"price\\\"')) AS DECIMAL) = 5 AND json_unquote(json_extract(`data`,'$.\\\"name\\\"')) = 'Product')",
           postgres: "(CAST((\"data\"#>>'{price}') AS DOUBLE PRECISION) = 5 AND (\"data\"#>>'{name}') = 'Product')",
-          sqlite: "(CAST(json_extract(`data`, '$.price') AS DOUBLE PRECISION) = 5 AND json_extract(`data`, '$.name') = 'Product')"
+          sqlite: "(CAST(json_extract(`data`,'$.price') AS DOUBLE PRECISION) = 5 AND json_extract(`data`,'$.name') = 'Product')"
         });
 
         testsql('data.nested.attribute', 'value', {
@@ -924,9 +991,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           }
         }, {
           mariadb: "json_unquote(json_extract(`data`,'$.nested.attribute')) = 'value'",
-          mysql: "(`data`->>'$.\"nested\".\"attribute\"') = 'value'",
+          mysql: "json_unquote(json_extract(`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) = 'value'",
           postgres: "(\"data\"#>>'{nested,attribute}') = 'value'",
-          sqlite: "json_extract(`data`, '$.nested.attribute') = 'value'"
+          sqlite: "json_extract(`data`,'$.nested.attribute') = 'value'"
         });
 
         testsql('data.nested.attribute', 4, {
@@ -939,9 +1006,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           }
         }, {
           mariadb: "CAST(json_unquote(json_extract(`data`,'$.nested.attribute')) AS DECIMAL) = 4",
-          mysql: "CAST((`data`->>'$.\"nested\".\"attribute\"') AS DECIMAL) = 4",
+          mysql: "CAST(json_unquote(json_extract(`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) AS DECIMAL) = 4",
           postgres: "CAST((\"data\"#>>'{nested,attribute}') AS DOUBLE PRECISION) = 4",
-          sqlite: "CAST(json_extract(`data`, '$.nested.attribute') AS DOUBLE PRECISION) = 4"
+          sqlite: "CAST(json_extract(`data`,'$.nested.attribute') AS DOUBLE PRECISION) = 4"
         });
 
         testsql('data.nested.attribute', {
@@ -956,9 +1023,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           }
         }, {
           mariadb: "CAST(json_unquote(json_extract(`data`,'$.nested.attribute')) AS DECIMAL) IN (3, 7)",
-          mysql: "CAST((`data`->>'$.\"nested\".\"attribute\"') AS DECIMAL) IN (3, 7)",
+          mysql: "CAST(json_unquote(json_extract(`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) AS DECIMAL) IN (3, 7)",
           postgres: "CAST((\"data\"#>>'{nested,attribute}') AS DOUBLE PRECISION) IN (3, 7)",
-          sqlite: "CAST(json_extract(`data`, '$.nested.attribute') AS DOUBLE PRECISION) IN (3, 7)"
+          sqlite: "CAST(json_extract(`data`,'$.nested.attribute') AS DOUBLE PRECISION) IN (3, 7)"
         });
 
         testsql('data', {
@@ -973,9 +1040,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           }
         }, {
           mariadb: "CAST(json_unquote(json_extract(`data`,'$.nested.attribute')) AS DECIMAL) > 2",
-          mysql: "CAST((`data`->>'$.\"nested\".\"attribute\"') AS DECIMAL) > 2",
+          mysql: "CAST(json_unquote(json_extract(`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) AS DECIMAL) > 2",
           postgres: "CAST((\"data\"#>>'{nested,attribute}') AS DOUBLE PRECISION) > 2",
-          sqlite: "CAST(json_extract(`data`, '$.nested.attribute') AS DOUBLE PRECISION) > 2"
+          sqlite: "CAST(json_extract(`data`,'$.nested.attribute') AS DOUBLE PRECISION) > 2"
         });
 
         testsql('data', {
@@ -990,9 +1057,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           }
         }, {
           mariadb: "CAST(json_unquote(json_extract(`data`,'$.nested.attribute')) AS DECIMAL) > 2",
-          mysql: "CAST((`data`->>'$.\"nested\".\"attribute\"') AS DECIMAL) > 2",
+          mysql: "CAST(json_unquote(json_extract(`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) AS DECIMAL) > 2",
           postgres: "CAST((\"data\"#>>'{nested,attribute}') AS INTEGER) > 2",
-          sqlite: "CAST(json_extract(`data`, '$.nested.attribute') AS INTEGER) > 2"
+          sqlite: "CAST(json_extract(`data`,'$.nested.attribute') AS INTEGER) > 2"
         });
 
         const dt = new Date();
@@ -1008,9 +1075,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           }
         }, {
           mariadb: `CAST(json_unquote(json_extract(\`data\`,'$.nested.attribute')) AS DATETIME) > ${sql.escape(dt)}`,
-          mysql: `CAST((\`data\`->>'$."nested"."attribute"') AS DATETIME) > ${sql.escape(dt)}`,
+          mysql: `CAST(json_unquote(json_extract(\`data\`,'$.\\"nested\\".\\"attribute\\"')) AS DATETIME) > ${sql.escape(dt)}`,
           postgres: `CAST(("data"#>>'{nested,attribute}') AS TIMESTAMPTZ) > ${sql.escape(dt)}`,
-          sqlite: `json_extract(\`data\`, '$.nested.attribute') > ${sql.escape(dt.toISOString())}`
+          sqlite: `json_extract(\`data\`,'$.nested.attribute') > ${sql.escape(dt.toISOString())}`
         });
 
         testsql('data', {
@@ -1023,9 +1090,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           }
         }, {
           mariadb: "json_unquote(json_extract(`data`,'$.nested.attribute')) = 'true'",
-          mysql: "(`data`->>'$.\"nested\".\"attribute\"') = 'true'",
+          mysql: "json_unquote(json_extract(`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) = 'true'",
           postgres: "CAST((\"data\"#>>'{nested,attribute}') AS BOOLEAN) = true",
-          sqlite: "CAST(json_extract(`data`, '$.nested.attribute') AS BOOLEAN) = 1"
+          sqlite: "CAST(json_extract(`data`,'$.nested.attribute') AS BOOLEAN) = 1"
         });
 
         testsql('metaData.nested.attribute', 'value', {
@@ -1040,9 +1107,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           }
         }, {
           mariadb: "json_unquote(json_extract(`meta_data`,'$.nested.attribute')) = 'value'",
-          mysql: "(`meta_data`->>'$.\"nested\".\"attribute\"') = 'value'",
+          mysql: "json_unquote(json_extract(`meta_data`,'$.\\\"nested\\\".\\\"attribute\\\"')) = 'value'",
           postgres: "(\"meta_data\"#>>'{nested,attribute}') = 'value'",
-          sqlite: "json_extract(`meta_data`, '$.nested.attribute') = 'value'"
+          sqlite: "json_extract(`meta_data`,'$.nested.attribute') = 'value'"
         });
       });
     }
@@ -1064,7 +1131,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
     }
 
     if (current.dialect.supports.REGEXP) {
-      describe('$regexp', () => {
+      describe('Op.regexp', () => {
         testsql('username', {
           [Op.regexp]: '^sw.*r$'
         }, {
@@ -1074,7 +1141,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
         });
       });
 
-      describe('$regexp', () => {
+      describe('Op.regexp', () => {
         testsql('newline', {
           [Op.regexp]: '^new\nline$'
         }, {
@@ -1084,7 +1151,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
         });
       });
 
-      describe('$notRegexp', () => {
+      describe('Op.notRegexp', () => {
         testsql('username', {
           [Op.notRegexp]: '^sw.*r$'
         }, {
@@ -1094,7 +1161,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
         });
       });
 
-      describe('$notRegexp', () => {
+      describe('Op.notRegexp', () => {
         testsql('newline', {
           [Op.notRegexp]: '^new\nline$'
         }, {
@@ -1105,7 +1172,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
       });
 
       if (current.dialect.name === 'postgres') {
-        describe('$iRegexp', () => {
+        describe('Op.iRegexp', () => {
           testsql('username', {
             [Op.iRegexp]: '^sw.*r$'
           }, {
@@ -1113,7 +1180,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           });
         });
 
-        describe('$iRegexp', () => {
+        describe('Op.iRegexp', () => {
           testsql('newline', {
             [Op.iRegexp]: '^new\nline$'
           }, {
@@ -1121,7 +1188,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           });
         });
 
-        describe('$notIRegexp', () => {
+        describe('Op.notIRegexp', () => {
           testsql('username', {
             [Op.notIRegexp]: '^sw.*r$'
           }, {
@@ -1129,7 +1196,7 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
           });
         });
 
-        describe('$notIRegexp', () => {
+        describe('Op.notIRegexp', () => {
           testsql('newline', {
             [Op.notIRegexp]: '^new\nline$'
           }, {
@@ -1168,6 +1235,19 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
 
     testsql(current.where(current.fn('SUM', current.col('hours')), Op.gt, 0), {
       default: 'SUM([hours]) > 0'
+    });
+
+    testsql(current.where(current.fn('lower', current.col('name')), Op.ne, null), {
+      default: 'lower([name]) IS NOT NULL'
+    });
+
+    testsql(current.where(current.fn('lower', current.col('name')), Op.not, null), {
+      default: 'lower([name]) IS NOT NULL'
+    });
+
+    testsql([current.where(current.fn('SUM', current.col('hours')), Op.gt, 0),
+      current.where(current.fn('lower', current.col('name')), null)], {
+      default: '(SUM([hours]) > 0 AND lower([name]) IS NULL)'
     });
   });
 });

@@ -6,7 +6,6 @@ const chai = require('chai'),
   stub = sinon.stub,
   _ = require('lodash'),
   Support = require('../support'),
-  Promise = Support.Sequelize.Promise,
   DataTypes = require('../../../lib/data-types'),
   HasMany = require('../../../lib/associations/has-many'),
   Op = require('../../../lib/operators'),
@@ -22,7 +21,7 @@ describe(Support.getTestDialectTeaser('hasMany'), () => {
   });
 
   describe('optimizations using bulk create, destroy and update', () => {
-    const User =current.define('User', { username: DataTypes.STRING }),
+    const User = current.define('User', { username: DataTypes.STRING }),
       Task = current.define('Task', { title: DataTypes.STRING });
 
     User.hasMany(Task);
@@ -38,8 +37,8 @@ describe(Support.getTestDialectTeaser('hasMany'), () => {
       });
 
     beforeEach(function() {
-      this.findAll = stub(Task, 'findAll').returns(Promise.resolve([]));
-      this.update = stub(Task, 'update').returns(Promise.resolve([]));
+      this.findAll = stub(Task, 'findAll').resolves([]);
+      this.update = stub(Task, 'update').resolves([]);
     });
 
     afterEach(function() {
@@ -47,33 +46,30 @@ describe(Support.getTestDialectTeaser('hasMany'), () => {
       this.update.restore();
     });
 
-    it('uses one update statement for addition', function() {
-      return user.setTasks([task1, task2]).then(() => {
-        expect(this.findAll).to.have.been.calledOnce;
-        expect(this.update).to.have.been.calledOnce;
-      });
+    it('uses one update statement for addition', async function() {
+      await user.setTasks([task1, task2]);
+      expect(this.findAll).to.have.been.calledOnce;
+      expect(this.update).to.have.been.calledOnce;
     });
 
-    it('uses one delete from statement', function() {
+    it('uses one delete from statement', async function() {
       this.findAll
-        .onFirstCall().returns(Promise.resolve([]))
-        .onSecondCall().returns(Promise.resolve([
+        .onFirstCall().resolves([])
+        .onSecondCall().resolves([
           { userId: 42, taskId: 15 },
           { userId: 42, taskId: 16 }
-        ]));
+        ]);
 
-      return user.setTasks([task1, task2]).then(() => {
-        this.update.resetHistory();
-        return user.setTasks(null);
-      }).then(() => {
-        expect(this.findAll).to.have.been.calledTwice;
-        expect(this.update).to.have.been.calledOnce;
-      });
+      await user.setTasks([task1, task2]);
+      this.update.resetHistory();
+      await user.setTasks(null);
+      expect(this.findAll).to.have.been.calledTwice;
+      expect(this.update).to.have.been.calledOnce;
     });
   });
 
   describe('mixin', () => {
-    const User =current.define('User'),
+    const User = current.define('User'),
       Task = current.define('Task');
 
     it('should mixin association methods', () => {
@@ -137,18 +133,18 @@ describe(Support.getTestDialectTeaser('hasMany'), () => {
   });
 
   describe('get', () => {
-    const User =current.define('User', {}),
+    const User = current.define('User', {}),
       Task = current.define('Task', {}),
       idA = Math.random().toString(),
       idB = Math.random().toString(),
       idC = Math.random().toString(),
       foreignKey = 'user_id';
 
-    it('should fetch associations for a single instance', () => {
-      const findAll = stub(Task, 'findAll').returns(Promise.resolve([
+    it('should fetch associations for a single instance', async () => {
+      const findAll = stub(Task, 'findAll').resolves([
         Task.build({}),
         Task.build({})
-      ]));
+      ]);
 
       User.Tasks = User.hasMany(Task, { foreignKey });
       const actual = User.Tasks.get(User.build({ id: idA }));
@@ -160,15 +156,16 @@ describe(Support.getTestDialectTeaser('hasMany'), () => {
       expect(findAll).to.have.been.calledOnce;
       expect(findAll.firstCall.args[0].where).to.deep.equal(where);
 
-      return actual.then(results => {
+      try {
+        const results = await actual;
         expect(results).to.be.an('array');
         expect(results.length).to.equal(2);
-      }).finally(() => {
+      } finally {
         findAll.restore();
-      });
+      }
     });
 
-    it('should fetch associations for multiple source instances', () => {
+    it('should fetch associations for multiple source instances', async () => {
       const findAll = stub(Task, 'findAll').returns(
         Promise.resolve([
           Task.build({
@@ -197,16 +194,17 @@ describe(Support.getTestDialectTeaser('hasMany'), () => {
       expect(findAll.firstCall.args[0].where[foreignKey]).to.have.property(Op.in);
       expect(findAll.firstCall.args[0].where[foreignKey][Op.in]).to.deep.equal([idA, idB, idC]);
 
-      return actual.then(result => {
+      try {
+        const result = await actual;
         expect(result).to.be.an('object');
         expect(Object.keys(result)).to.deep.equal([idA, idB, idC]);
 
         expect(result[idA].length).to.equal(3);
         expect(result[idB].length).to.equal(1);
         expect(result[idC].length).to.equal(0);
-      }).finally(() => {
+      } finally {
         findAll.restore();
-      });
+      }
     });
   });
   describe('association hooks', () => {

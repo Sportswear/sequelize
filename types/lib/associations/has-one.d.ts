@@ -1,21 +1,27 @@
 import { DataType } from '../data-types';
-import { CreateOptions, FindOptions, Model, SaveOptions } from '../model';
-import { Promise } from '../promise';
+import { CreateOptions, FindOptions, Model, ModelCtor, SaveOptions } from '../model';
 import { Association, AssociationOptions, SingleAssociationAccessors } from './base';
 
 /**
  * Options provided when associating models with hasOne relationship
  */
 export interface HasOneOptions extends AssociationOptions {
+
+  /**
+   * The name of the field to use as the key for the association in the source table. Defaults to the primary
+   * key of the source table
+   */
+  sourceKey?: string;
+
   /**
    * A string or a data type to represent the identifier in the table
    */
   keyType?: DataType;
 }
 
-export class HasOne extends Association {
+export class HasOne<S extends Model = Model, T extends Model = Model> extends Association<S, T> {
   public accessors: SingleAssociationAccessors;
-  constructor(source: typeof Model, target: typeof Model, options: HasOneOptions);
+  constructor(source: ModelCtor<S>, target: ModelCtor<T>, options: HasOneOptions);
 }
 
 /**
@@ -44,7 +50,7 @@ export interface HasOneGetAssociationMixinOptions extends FindOptions {
  * }
  * ```
  *
- * @see http://docs.sequelizejs.com/en/latest/api/associations/has-one/
+ * @see https://sequelize.org/master/class/lib/associations/has-one.js~HasOne.html
  * @see Instance
  */
 export type HasOneGetAssociationMixin<TModel> = (options?: HasOneGetAssociationMixinOptions) => Promise<TModel>;
@@ -75,7 +81,7 @@ export interface HasOneSetAssociationMixinOptions extends HasOneGetAssociationMi
  * }
  * ```
  *
- * @see http://docs.sequelizejs.com/en/latest/api/associations/has-one/
+ * @see https://sequelize.org/master/class/lib/associations/has-one.js~HasOne.html
  * @see Instance
  */
 export type HasOneSetAssociationMixin<TModel, TModelPrimaryKey> = (
@@ -104,10 +110,10 @@ export interface HasOneCreateAssociationMixinOptions extends HasOneSetAssociatio
  * }
  * ```
  *
- * @see http://docs.sequelizejs.com/en/latest/api/associations/has-one/
+ * @see https://sequelize.org/master/class/lib/associations/has-one.js~HasOne.html
  * @see Instance
  */
 export type HasOneCreateAssociationMixin<TModel> = (
-  values?: { [attribute: string]: any },
+  values?: { [attribute: string]: unknown },
   options?: HasOneCreateAssociationMixinOptions
 ) => Promise<TModel>;

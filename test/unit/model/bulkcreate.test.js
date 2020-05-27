@@ -4,8 +4,6 @@ const chai = require('chai'),
   expect = chai.expect,
   sinon = require('sinon'),
   Support = require('../support'),
-  Sequelize = require('../../../index'),
-  Promise = Sequelize.Promise,
   DataTypes = require('../../../lib/data-types'),
   current = Support.sequelize;
 
@@ -20,7 +18,7 @@ describe(Support.getTestDialectTeaser('Model'), () => {
         }
       }, { timestamps: false });
 
-      this.stub = sinon.stub(current.getQueryInterface(), 'bulkInsert').returns(Promise.resolve([]));
+      this.stub = sinon.stub(current.getQueryInterface(), 'bulkInsert').resolves([]);
     });
 
     afterEach(function() {
@@ -32,14 +30,14 @@ describe(Support.getTestDialectTeaser('Model'), () => {
     });
 
     describe('validations', () => {
-      it('should not fail for renamed fields', function() {
-        return this.Model.bulkCreate([
+      it('should not fail for renamed fields', async function() {
+        await this.Model.bulkCreate([
           { accountId: 42 }
-        ], { validate: true }).then(() => {
-          expect(this.stub.getCall(0).args[1]).to.deep.equal([
-            { account_id: 42, id: null }
-          ]);
-        });
+        ], { validate: true });
+
+        expect(this.stub.getCall(0).args[1]).to.deep.equal([
+          { account_id: 42, id: null }
+        ]);
       });
     });
   });

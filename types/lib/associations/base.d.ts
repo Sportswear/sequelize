@@ -1,9 +1,9 @@
-import { ColumnOptions, Model } from '../model';
+import { ColumnOptions, Model, ModelCtor, Hookable } from '../model';
 
-export abstract class Association {
+export abstract class Association<S extends Model = Model, T extends Model = Model> {
   public associationType: string;
-  public source: typeof Model;
-  public target: typeof Model;
+  public source: ModelCtor<S>;
+  public target: ModelCtor<T>;
   public isSelfAssociation: boolean;
   public isSingleAssociation: boolean;
   public isMultiAssociation: boolean;
@@ -42,22 +42,12 @@ export interface ForeignKeyOptions extends ColumnOptions {
 /**
  * Options provided when associating models
  */
-export interface AssociationOptions {
-  /**
-   * Set to true to run before-/afterDestroy hooks when an associated model is deleted because of a cascade.
-   * For example if `User.hasOne(Profile, {onDelete: 'cascade', hooks:true})`, the before-/afterDestroy hooks
-   * for profile will be called when a user is deleted. Otherwise the profile will be deleted without invoking
-   * any hooks.
-   *
-   * @default false
-   */
-  hooks?: boolean;
-
+export interface AssociationOptions extends Hookable {
   /**
    * The alias of this model, in singular form. See also the `name` option passed to `sequelize.define`. If
    * you create multiple associations between the same tables, you should provide an alias to be able to
    * distinguish between them. If you provide an alias when creating the assocition, you should provide the
-   * same alias when eager loading and when getting assocated models. Defaults to the singularized name of
+   * same alias when eager loading and when getting associated models. Defaults to the singularized name of
    * target
    */
   as?: string | { singular: string; plural: string };
@@ -101,7 +91,7 @@ export interface AssociationScope {
   /**
    * The name of the column that will be used for the associated scope and it's value
    */
-  [scopeName: string]: any;
+  [scopeName: string]: unknown;
 }
 
 /**

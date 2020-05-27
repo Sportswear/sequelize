@@ -1,18 +1,14 @@
 'use strict';
 
-const fs = require('fs'),
-  path = require('path'),
-  _ = require('lodash'),
-  Sequelize = require('../index'),
-  DataTypes = require('../lib/data-types'),
-  Config = require('./config/config'),
-  supportShim = require('./supportShim'),
-  chai = require('chai'),
-  expect = chai.expect,
-  AbstractQueryGenerator = require('../lib/dialects/abstract/query-generator');
+const fs = require('fs');
+const path = require('path');
+const _ = require('lodash');
+const Sequelize = require('../index');
+const Config = require('./config/config');
+const chai = require('chai');
+const expect = chai.expect;
+const AbstractQueryGenerator = require('../lib/dialects/abstract/query-generator');
 
-
-chai.use(require('chai-spies'));
 chai.use(require('chai-datetime'));
 chai.use(require('chai-as-promised'));
 chai.use(require('sinon-chai'));
@@ -24,66 +20,76 @@ process.on('uncaughtException', e => {
   console.error('An unhandled exception occurred:');
   throw e;
 });
-Sequelize.Promise.onPossiblyUnhandledRejection(e => {
+
+let onNextUnhandledRejection = null;
+let unhandledRejections = null;
+
+process.on('unhandledRejection', e => {
+  if (unhandledRejections) {
+    unhandledRejections.push(e);
+  }
+  const onNext = onNextUnhandledRejection;
+  if (onNext) {
+    onNextUnhandledRejection = null;
+    onNext(e);
+  }
+  if (onNext || unhandledRejections) return;
   console.error('An unhandled rejection occurred:');
   throw e;
 });
-Sequelize.Promise.longStackTraces();
 
-// shim all Sequelize methods for testing for correct `options.logging` passing
-// and no modification of `options` objects
-if (!process.env.COVERAGE && process.env.SHIM) supportShim(Sequelize);
+if (global.afterEach) {
+  afterEach(() => {
+    onNextUnhandledRejection = null;
+    unhandledRejections = null;
+  });
+}
+
+let lastSqliteInstance;
 
 const Support = {
   Sequelize,
 
-  initTests(options) {
-    const sequelize = this.createSequelizeInstance(options);
-
-    this.clearDatabase(sequelize, () => {
-      if (options.context) {
-        options.context.sequelize = sequelize;
-      }
-
-      if (options.beforeComplete) {
-        options.beforeComplete(sequelize, DataTypes);
-      }
-
-      if (options.onComplete) {
-        options.onComplete(sequelize, DataTypes);
-      }
-    });
+  /**
+   * Returns a Promise that will reject with the next unhandled rejection that occurs
+   * during this test (instead of failing the test)
+   */
+  nextUnhandledRejection() {
+    return new Promise((resolve, reject) => onNextUnhandledRejection = reject);
   },
 
-  prepareTransactionTest(sequelize, callback) {
+  /**
+   * Pushes all unhandled rejections that occur during this test onto destArray
+   * (instead of failing the test).
+   *
+   * @param {Error[]} destArray the array to push unhandled rejections onto.  If you omit this,
+   * one will be created and returned for you.
+   *
+   * @returns {Error[]} destArray
+   */
+  captureUnhandledRejections(destArray = []) {
+    return unhandledRejections = destArray;
+  },
+
+  async prepareTransactionTest(sequelize) {
     const dialect = Support.getTestDialect();
 
     if (dialect === 'sqlite') {
       const p = path.join(__dirname, 'tmp', 'db.sqlite');
+      if (lastSqliteInstance) {
+        await lastSqliteInstance.close();
+      }
+      if (fs.existsSync(p)) {
+        fs.unlinkSync(p);
+      }
+      const options = { ...sequelize.options, storage: p },
+        _sequelize = new Sequelize(sequelize.config.database, null, null, options);
 
-      return new Sequelize.Promise(resolve => {
-        // We cannot promisify exists, since exists does not follow node callback convention - first argument is a boolean, not an error / null
-        if (fs.existsSync(p)) {
-          resolve(Sequelize.Promise.promisify(fs.unlink)(p));
-        } else {
-          resolve();
-        }
-      }).then(() => {
-        const options = Object.assign({}, sequelize.options, { storage: p }),
-          _sequelize = new Sequelize(sequelize.config.database, null, null, options);
-
-        if (callback) {
-          _sequelize.sync({ force: true }).then(() => { callback(_sequelize); });
-        } else {
-          return _sequelize.sync({ force: true }).return(_sequelize);
-        }
-      });
+      await _sequelize.sync({ force: true });
+      lastSqliteInstance = _sequelize;
+      return _sequelize;
     }
-    if (callback) {
-      callback(sequelize);
-    } else {
-      return Sequelize.Promise.resolve(sequelize);
-    }
+    return sequelize;
   },
 
   createSequelizeInstance(options) {
@@ -98,7 +104,8 @@ const Support = {
       dialect: options.dialect,
       port: options.port || process.env.SEQ_PORT || config.port,
       pool: config.pool,
-      dialectOptions: options.dialectOptions || config.dialectOptions || {}
+      dialectOptions: options.dialectOptions || config.dialectOptions || {},
+      minifyAliases: options.minifyAliases || config.minifyAliases
     });
 
     if (process.env.DIALECT === 'postgres-native') {
@@ -126,54 +133,39 @@ const Support = {
     return new Sequelize(db, user, pass, options);
   },
 
-  clearDatabase(sequelize) {
-    return sequelize
-      .getQueryInterface()
-      .dropAllTables()
-      .then(() => {
-        sequelize.modelManager.models = [];
-        sequelize.models = {};
+  async clearDatabase(sequelize) {
+    const qi = sequelize.getQueryInterface();
+    await qi.dropAllTables();
+    sequelize.modelManager.models = [];
+    sequelize.models = {};
 
-        return sequelize
-          .getQueryInterface()
-          .dropAllEnums();
-      })
-      .then(() => {
-        return this.dropTestSchemas(sequelize);
-      });
+    if (qi.dropAllEnums) {
+      await qi.dropAllEnums();
+    }
+    await this.dropTestSchemas(sequelize);
   },
 
-  dropTestSchemas(sequelize) {
-
+  async dropTestSchemas(sequelize) {
     const queryInterface = sequelize.getQueryInterface();
-    if (!queryInterface.QueryGenerator._dialect.supports.schemas) {
+    if (!queryInterface.queryGenerator._dialect.supports.schemas) {
       return this.sequelize.drop({});
     }
 
-    return sequelize.showAllSchemas().then(schemas => {
-      const schemasPromise = [];
-      schemas.forEach(schema => {
-        const schemaName = schema.name ? schema.name : schema;
-        if (schemaName !== sequelize.config.database) {
-          schemasPromise.push(sequelize.dropSchema(schemaName));
-        }
-      });
-      return Promise.all(schemasPromise.map(p => p.catch(e => e)))
-        .then(() => {}, () => {});
+    const schemas = await sequelize.showAllSchemas();
+    const schemasPromise = [];
+    schemas.forEach(schema => {
+      const schemaName = schema.name ? schema.name : schema;
+      if (schemaName !== sequelize.config.database) {
+        schemasPromise.push(sequelize.dropSchema(schemaName));
+      }
     });
+
+    await Promise.all(schemasPromise.map(p => p.catch(e => e)));
   },
 
   getSupportedDialects() {
     return fs.readdirSync(`${__dirname}/../lib/dialects`)
       .filter(file => !file.includes('.js') && !file.includes('abstract'));
-  },
-
-  checkMatchForDialects(dialect, value, expectations) {
-    if (expectations[dialect]) {
-      expect(value).to.match(expectations[dialect]);
-    } else {
-      throw new Error(`Undefined expectation for "${dialect}"!`);
-    }
   },
 
   getAbstractQueryGenerator(sequelize) {
@@ -215,25 +207,6 @@ const Support = {
     return `[${dialect.toUpperCase()}] ${moduleName}`;
   },
 
-  getTestUrl(config) {
-    let url;
-    const dbConfig = config[config.dialect];
-
-    if (config.dialect === 'sqlite') {
-      url = `sqlite://${dbConfig.storage}`;
-    } else {
-
-      let credentials = dbConfig.username;
-      if (dbConfig.password) {
-        credentials += `:${dbConfig.password}`;
-      }
-
-      url = `${config.dialect}://${credentials
-      }@${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`;
-    }
-    return url;
-  },
-
   expectsql(query, assertions) {
     const expectations = assertions.query || assertions;
     let expectation = expectations[Support.sequelize.dialect.name];
@@ -265,9 +238,13 @@ const Support = {
 };
 
 if (global.beforeEach) {
+  before(function() {
+    this.sequelize = Support.sequelize;
+  });
   beforeEach(function() {
     this.sequelize = Support.sequelize;
   });
 }
+
 Support.sequelize = Support.createSequelizeInstance();
 module.exports = Support;

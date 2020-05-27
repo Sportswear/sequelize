@@ -6,8 +6,7 @@ const chai = require('chai'),
   Sequelize = Support.Sequelize,
   current = Support.sequelize,
   sinon = require('sinon'),
-  DataTypes = require('../../../lib/data-types'),
-  Promise = require('bluebird');
+  DataTypes = require('../../../lib/data-types');
 
 describe(Support.getTestDialectTeaser('Model'), () => {
   describe('method count', () => {
@@ -15,7 +14,7 @@ describe(Support.getTestDialectTeaser('Model'), () => {
       this.oldFindAll = Sequelize.Model.findAll;
       this.oldAggregate = Sequelize.Model.aggregate;
 
-      Sequelize.Model.findAll = sinon.stub().returns(Promise.resolve());
+      Sequelize.Model.findAll = sinon.stub().resolves();
 
       this.User = current.define('User', {
         username: DataTypes.STRING,
@@ -35,36 +34,32 @@ describe(Support.getTestDialectTeaser('Model'), () => {
     });
 
     beforeEach(function() {
-      this.stub = Sequelize.Model.aggregate = sinon.stub().returns(Promise.resolve());
+      this.stub = Sequelize.Model.aggregate = sinon.stub().resolves();
     });
 
     describe('should pass the same options to model.aggregate as findAndCountAll', () => {
-      it('with includes', function() {
+      it('with includes', async function() {
         const queryObject = {
           include: [this.Project]
         };
-        return this.User.count(queryObject)
-          .then(() => this.User.findAndCountAll(queryObject))
-          .then(() => {
-            const count = this.stub.getCall(0).args;
-            const findAndCountAll = this.stub.getCall(1).args;
-            expect(count).to.eql(findAndCountAll);
-          });
+        await this.User.count(queryObject);
+        await this.User.findAndCountAll(queryObject);
+        const count = this.stub.getCall(0).args;
+        const findAndCountAll = this.stub.getCall(1).args;
+        expect(count).to.eql(findAndCountAll);
       });
 
-      it('attributes should be stripped in case of findAndCountAll', function() {
+      it('attributes should be stripped in case of findAndCountAll', async function() {
         const queryObject = {
           attributes: ['username']
         };
-        return this.User.count(queryObject)
-          .then(() => this.User.findAndCountAll(queryObject))
-          .then(() => {
-            const count = this.stub.getCall(0).args;
-            const findAndCountAll = this.stub.getCall(1).args;
-            expect(count).not.to.eql(findAndCountAll);
-            count[2].attributes = undefined;
-            expect(count).to.eql(findAndCountAll);
-          });
+        await this.User.count(queryObject);
+        await this.User.findAndCountAll(queryObject);
+        const count = this.stub.getCall(0).args;
+        const findAndCountAll = this.stub.getCall(1).args;
+        expect(count).not.to.eql(findAndCountAll);
+        count[2].attributes = undefined;
+        expect(count).to.eql(findAndCountAll);
       });
     });
 
